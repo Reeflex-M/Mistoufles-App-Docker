@@ -1,0 +1,84 @@
+version: "3.8"
+
+services:
+  # Service MySQL
+  mysql:
+    image: mysql:8.0
+    container_name: mistoufles_mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: mistoufles_password
+      MYSQL_DATABASE: mistoufles_db
+      MYSQL_CHARSET: utf8mb4
+      MYSQL_COLLATION: utf8mb4_unicode_ci
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./mysql-init:/docker-entrypoint-initdb.d
+    networks:
+      - mistoufles_network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      timeout: 20s
+      retries: 10
+
+  # Service Backend Django
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: mistoufles_backend
+    restart: unless-stopped
+    environment:
+      - DB_ENGINE=django.db.backends.mysql
+      - DB_NAME=mistoufles_db
+      - DB_USER=root
+      - DB_PASSWORD=mistoufles_password
+      - DB_HOST=mysql
+      - DB_PORT=3306
+      - DEBUG=True
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app
+      - backend_media:/app/media
+    depends_on:
+      mysql:
+        condition: service_healthy
+    networks:
+      - mistoufles_network
+    command: >
+      sh -c "python manage.py migrate &&
+             python manage.py collectstatic --noinput &&
+             python create_admin.py &&
+             python manage.py runserver 0.0.0.0:8000"
+
+    # Service Frontend React
+  frontend:
+    build: 
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: mistoufles_frontend
+    restart: unless-stopped
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    depends_on:
+      - backend
+    networks:
+      - mistoufles_network
+    stdin_open: true
+    tty: true
+    environment:
+      - NODE_ENV=development
+
+networks:
+  mistoufles_network:
+    driver: bridge
+
+volumes:
+  mysql_data:
+  backend_media:
